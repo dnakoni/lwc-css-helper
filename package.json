@@ -1,0 +1,44 @@
+{
+  "name": "lwc-css-helper",
+  "displayName": "LWC CSS Helper",
+  "version": "0.0.1",
+  "description": "A tool to quickly add a blank CSS file to your LWC.",
+  "main": "./out/extension.js",
+  "icon": "images/icon.png",
+  "repository": {
+    "url": "https://github.com/dnakoni/lwc-css-helper"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Extension Packs",
+    "Programming Languages"
+  ],
+  "activationEvents": [],
+  "keywords": [],
+  "author": "Daniel Nakonieczny",
+  "publisher": "daniel-nakonieczny",
+  "devDependencies": {
+    "@types/node": "^22.13.14",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.8.2",
+    "vscode-test": "^1.6.1"
+  },
+  "contributes": {
+  "commands": [
+    {
+      "command": "lwc-css-helper.addCssFile",
+      "title": "NAKODX: Add CSS File"
+    }
+  ],
+  "menus": {
+    "explorer/context": [
+      {
+        "command": "lwc-css-helper.addCssFile",
+        "when": "(explorerResourceIsFolder == true) && (resourcePath =~ /.*force-app.*lwc.*/) && !(resourcePath =~ /.*__tests__.*/)"
+      }
+    ]
+  }
+}
+}
