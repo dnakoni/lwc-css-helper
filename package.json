@@ -36,7 +36,7 @@
     "explorer/context": [
       {
         "command": "lwc-css-helper.addCssFile",
-        "when": "(explorerResourceIsFolder == true) && (resourcePath =~ /.*force-app.*lwc.*/) && !(resourcePath =~ /.*__tests__.*/)"
+        "when": "(explorerResourceIsFolder == true) && (resourcePath =~ /.*force-app.*lwc\\/[^\\/]+$/) && !(resourcePath =~ /.*__tests__.*/)"
       }
     ]
   }
