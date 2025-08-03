@@ -1,7 +1,7 @@
 {
   "name": "lwc-css-helper",
   "displayName": "LWC CSS Helper",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A tool to quickly add a blank CSS file to your LWC.",
   "main": "./out/extension.js",
   "icon": "images/icon.png",
@@ -30,13 +30,24 @@
     {
       "command": "lwc-css-helper.addCssFile",
       "title": "NAKODX: Add CSS File"
+    },
+    {
+      "command": "lwc-css-helper.addCssFileFromEditor",
+      "title": "NAKODX: Add CSS File",
+      "enablement": "lwc-css-helper.canAddCssFromEditor"
     }
   ],
   "menus": {
     "explorer/context": [
       {
         "command": "lwc-css-helper.addCssFile",
-        "when": "(explorerResourceIsFolder == true) && (resourcePath =~ /.*force-app.*lwc\\/[^\\/]+$/) && !(resourcePath =~ /.*__tests__.*/)"
+        "when": "((explorerResourceIsFolder == true) && (resourcePath =~ /.*force-app.*lwc\\/[^\\/]+$/) && !(resourcePath =~ /.*__tests__.*/)) || ((explorerResourceIsFolder == false) && (resourcePath =~ /.*force-app.*lwc\\/[^\\/]+\\/.+/) && !(resourcePath =~ /.*__tests__.*/)) && !(resourcePath =~ /.*\\.css$/)"
+      }
+    ],
+    "commandPalette": [
+      {
+        "command": "lwc-css-helper.addCssFile",
+        "when": "false"
       }
     ]
   }
