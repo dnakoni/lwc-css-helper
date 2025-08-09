@@ -1,7 +1,7 @@
 {
   "name": "lwc-css-helper",
   "displayName": "LWC CSS Helper",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A tool to quickly add a blank CSS file to your LWC.",
   "main": "./out/extension.js",
   "icon": "images/icon.png",

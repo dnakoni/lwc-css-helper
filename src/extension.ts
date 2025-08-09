@@ -1,130 +1,145 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 
-// Helper function to get LWC folder from a file path
-function getLwcFolderFromFile(filePath: string): string | null {
-  const dir = path.dirname(filePath);
-  // Check if this directory is an LWC component folder
-  if (/.*force-app.*lwc\/[^\/]+$/.test(dir) && !dir.includes('__tests__')) {
-    return dir;
+/**
+ * Returns the LWC component folder for a given URI (file or folder), or null.
+ * We consider a folder to be an LWC component folder if its parent is named "lwc"
+ * and it is not "__tests__".
+ */
+async function getLwcComponentFolder(uri: vscode.Uri): Promise<vscode.Uri | null> {
+  try {
+    const stat = await vscode.workspace.fs.stat(uri);
+    const folder = (stat.type & vscode.FileType.Directory) ? uri : vscode.Uri.file(require('path').dirname(uri.fsPath));
+
+    const folderName = folder.path.split('/').pop();
+    const parentPath = folder.with({ path: folder.path.replace(/\/[^/]+$/, '') });
+    const parentName = parentPath.path.split('/').pop();
+
+    if (parentName === 'lwc' && folderName && folderName !== '__tests__') {
+      return folder;
+    }
+  } catch {
+    // swallow; will return null
   }
   return null;
 }
 
-// Function to update command palette availability based on active editor
-function updateCommandPaletteContext() {
-  const activeEditor = vscode.window.activeTextEditor;
-  let shouldEnableCommand = false;
-  
-  if (activeEditor) {
-    const filePath = activeEditor.document.uri.fsPath;
-    const lwcFolder = getLwcFolderFromFile(filePath);
-    
+/**
+ * Computes the CSS file URI for an LWC component folder.
+ */
+function cssFileForComponentFolder(folder: vscode.Uri): vscode.Uri {
+  const compName = folder.path.split('/').pop()!;
+  return vscode.Uri.joinPath(folder, `${compName}.css`);
+}
+
+let lastContextValue: boolean | undefined;
+
+async function updateCommandPaletteContext(forUri?: vscode.Uri) {
+  let shouldEnable = false;
+
+  const targetUri =
+    forUri ??
+    vscode.window.activeTextEditor?.document.uri;
+
+  if (targetUri) {
+    const lwcFolder = await getLwcComponentFolder(targetUri);
     if (lwcFolder) {
-      const folderName = path.basename(lwcFolder);
-      const cssFilePath = path.join(lwcFolder, `${folderName}.css`);
-      shouldEnableCommand = !fs.existsSync(cssFilePath);
+      const cssUri = cssFileForComponentFolder(lwcFolder);
+      try {
+        await vscode.workspace.fs.stat(cssUri);
+        shouldEnable = false; // exists → don't enable
+      } catch {
+        shouldEnable = true; // not found → can create
+      }
     }
   }
-  
-  vscode.commands.executeCommand('setContext', 'lwc-css-helper.canAddCssFromEditor', shouldEnableCommand);
+
+  if (shouldEnable !== lastContextValue) {
+    lastContextValue = shouldEnable;
+    await vscode.commands.executeCommand('setContext', 'lwc-css-helper.canAddCssFromEditor', shouldEnable);
+  }
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  // Initialize command palette context
-  updateCommandPaletteContext();
-  
-  // Update context when active editor changes
-  let onDidChangeActiveEditor = vscode.window.onDidChangeActiveTextEditor(() => {
-    updateCommandPaletteContext();
+  // Initial context set
+  updateCommandPaletteContext().catch(() => { /* noop */ });
+
+  // Debounced editor-change handler
+  let editorChangeTimer: NodeJS.Timeout | undefined;
+  const onDidChangeActiveEditor = vscode.window.onDidChangeActiveTextEditor(() => {
+    clearTimeout(editorChangeTimer);
+    editorChangeTimer = setTimeout(() => updateCommandPaletteContext().catch(() => {}), 75);
   });
-  
-  // Update context when files are saved (in case new CSS files are created outside the extension)
-  let onDidSaveDocument = vscode.workspace.onDidSaveTextDocument(() => {
-    updateCommandPaletteContext();
-  });
-  
-  // Shared function for CSS file creation logic
-  const createCssFile = async (uri: vscode.Uri | undefined) => {
+
+  // Watch for CSS file creation/deletion anywhere under lwc/* to keep context in sync
+  const watcher = vscode.workspace.createFileSystemWatcher('**/lwc/*/*.css');
+  const onCreate = watcher.onDidCreate(uri => updateCommandPaletteContext(uri).catch(() => {}));
+  const onDelete = watcher.onDidDelete(uri => updateCommandPaletteContext(uri).catch(() => {}));
+  // onDidChange is not needed for presence checks
+
+  const createCssFile = async (uri?: vscode.Uri) => {
     try {
+      // If invoked from Command Palette, use active editor
       if (!uri) {
-        // Command palette usage - get URI from active editor
-        const activeEditor = vscode.window.activeTextEditor;
-        if (!activeEditor) {
-          vscode.window.showErrorMessage('No file is currently open in the editor');
-          return;
+        const active = vscode.window.activeTextEditor?.document.uri;
+        if (!active) {
+          return vscode.window.showErrorMessage('No file is currently open in the editor.');
         }
-        
-        const lwcFolder = getLwcFolderFromFile(activeEditor.document.uri.fsPath);
-        if (!lwcFolder) {
-          vscode.window.showErrorMessage('The currently open file is not part of an LWC component');
-          return;
-        }
-        
-        uri = vscode.Uri.file(lwcFolder);
+        uri = active;
       }
 
-      let folderPath: string;
-      let folderName: string;
-      
-      // Check if the URI is a file or folder
-      const stat = fs.statSync(uri.fsPath);
-      
-      if (stat.isFile()) {
-        // If it's a file, get the LWC folder containing it
-        const lwcFolder = getLwcFolderFromFile(uri.fsPath);
-        if (!lwcFolder) {
-          vscode.window.showErrorMessage('Selected file is not in an LWC component folder');
-          return;
-        }
-        folderPath = lwcFolder;
-        folderName = path.basename(lwcFolder);
-      } else {
-        // If it's a folder, use it directly
-        folderPath = uri.fsPath;
-        folderName = path.basename(folderPath);
+      const lwcFolder = await getLwcComponentFolder(uri);
+      if (!lwcFolder) {
+        return vscode.window.showErrorMessage('The selected item is not inside an LWC component folder (lwc/<component>).');
       }
-      
-      // Check if the CSS file already exists
-      const cssFilePath = path.join(folderPath, `${folderName}.css`);
-      
-      if (fs.existsSync(cssFilePath)) {
-        const openFile = await vscode.window.showInformationMessage(
-          `CSS file already exists for ${folderName}. Would you like to open it?`,
-          'Yes', 'No'
+
+      const cssUri = cssFileForComponentFolder(lwcFolder);
+
+      // If exists, offer to open
+      try {
+        await vscode.workspace.fs.stat(cssUri);
+        const action = await vscode.window.showInformationMessage(
+          `CSS file already exists for "${lwcFolder.path.split('/').pop()}". Open it?`,
+          'Open',
+          'Cancel'
         );
-        
-        if (openFile === 'Yes') {
-          const document = await vscode.workspace.openTextDocument(cssFilePath);
-          vscode.window.showTextDocument(document);
+        if (action === 'Open') {
+          const doc = await vscode.workspace.openTextDocument(cssUri);
+          await vscode.window.showTextDocument(doc, { preview: false });
         }
         return;
+      } catch {
+        // file does not exist → proceed
       }
-      
+
       // Create the CSS file
-      fs.writeFileSync(cssFilePath, '/* Add your CSS styles here */\n');
-      
-      // Update command palette context immediately after creating CSS
-      updateCommandPaletteContext();
-      
-      // Open the file in the editor
-      const document = await vscode.workspace.openTextDocument(cssFilePath);
-      vscode.window.showTextDocument(document);
-      
-      vscode.window.showInformationMessage(`CSS file created for ${folderName}`);
-    } catch (error) {
-      vscode.window.showErrorMessage(`Error creating CSS file: ${error instanceof Error ? error.message : String(error)}`);
+      const initialContent = Buffer.from('/* Add your CSS styles here */\n', 'utf8');
+      await vscode.workspace.fs.writeFile(cssUri, initialContent);
+
+      // Update context immediately
+      await updateCommandPaletteContext(cssUri);
+
+      // Open in editor
+      const doc = await vscode.workspace.openTextDocument(cssUri);
+      await vscode.window.showTextDocument(doc, { preview: false });
+
+      vscode.window.showInformationMessage(`CSS file created for "${lwcFolder.path.split('/').pop()}".`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Error creating CSS file: ${message}`);
     }
   };
 
-  // Register the command for adding CSS file (context menu)
-  let addCssCommand = vscode.commands.registerCommand('lwc-css-helper.addCssFile', createCssFile);
-  
-  // Register the command for adding CSS file from editor (command palette)
-  let addCssFromEditorCommand = vscode.commands.registerCommand('lwc-css-helper.addCssFileFromEditor', createCssFile);
+  const addCssCommand = vscode.commands.registerCommand('lwc-css-helper.addCssFile', createCssFile);
+  const addCssFromEditorCommand = vscode.commands.registerCommand('lwc-css-helper.addCssFileFromEditor', createCssFile);
 
-  context.subscriptions.push(addCssCommand, addCssFromEditorCommand, onDidChangeActiveEditor, onDidSaveDocument);
+  context.subscriptions.push(
+    addCssCommand,
+    addCssFromEditorCommand,
+    onDidChangeActiveEditor,
+    watcher,
+    onCreate,
+    onDelete
+  );
 }
 
 export function deactivate() {}
